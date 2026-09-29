@@ -1,3 +1,5 @@
 .venv
 venv
 .env
+.xero_token.json
+.xero_oauth_state.json
