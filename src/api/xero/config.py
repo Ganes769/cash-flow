@@ -28,3 +28,4 @@ SCOPES = os.getenv("XERO_SCOPES", DEFAULT_SCOPES)
 
 LOGIN_PATH = "/xero/login"
 LOGIN_URL_PATH = "/xero/login/url"
+FRONTEND_ORIGIN = os.getenv("FRONTEND_ORIGIN", "http://localhost:5191").strip().rstrip("/")

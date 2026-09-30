@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import RedirectResponse
 
 from src.api.xero.auth import (
@@ -7,7 +7,7 @@ from src.api.xero.auth import (
     get_connection_status,
     get_oauth_setup,
 )
-from src.api.xero.config import LOGIN_PATH, LOGIN_URL_PATH
+from src.api.xero.config import FRONTEND_ORIGIN, LOGIN_PATH, LOGIN_URL_PATH
 from src.api.xero.contacts import fetch_contacts
 from src.api.xero.exceptions import XeroNotConnectedError
 from src.api.xero import token_store
@@ -49,6 +49,19 @@ def login_url():
     }
 
 
+def _app_redirect(path: str = "/login/xero", error: str | None = None) -> RedirectResponse:
+    url = f"{FRONTEND_ORIGIN}{path}"
+    if error:
+        url = f"{url}?xero_error={error}"
+    return RedirectResponse(url, status_code=302)
+
+
+def _wants_html(request: Request) -> bool:
+    accept = (request.headers.get("accept") or "").lower()
+    first = accept.split(",")[0].strip()
+    return first.startswith("text/html")
+
+
 @router.get("/callback")
 def oauth_callback(
     code: str | None = None,
@@ -56,21 +69,26 @@ def oauth_callback(
     error: str | None = None,
 ):
     if error:
-        raise HTTPException(status_code=400, detail=f"Xero login failed: {error}")
+        return _app_redirect("/login", error=error)
     if not code:
-        raise HTTPException(status_code=400, detail="Missing authorization code.")
+        return _app_redirect("/login", error="missing_code")
     if not token_store.verify_oauth_state(state):
-        raise HTTPException(status_code=400, detail="Invalid OAuth state.")
+        return _app_redirect("/login", error="invalid_state")
     try:
         complete_oauth_callback(code)
-    except RuntimeError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
-    return RedirectResponse("/xero/status")
+    except RuntimeError:
+        return _app_redirect("/login", error="token_exchange_failed")
+    return _app_redirect("/login/xero")
 
 
 @router.get("/status")
-def status():
-    return get_connection_status()
+def status(request: Request):
+    payload = get_connection_status()
+    if _wants_html(request):
+        if payload.get("connected") and payload.get("token_valid"):
+            return _app_redirect("/login/xero")
+        return _app_redirect("/login")
+    return payload
 
 
 @router.get("/setup")
