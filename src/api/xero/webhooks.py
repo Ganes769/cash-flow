@@ -35,21 +35,33 @@ def _apply_event(event: dict) -> None:
     deleted = event_type == "DELETE"
     if deleted:
         if category == "CONTACT":
-            xero_sync.upsert_contact(tenant_id, {"ContactID": resource_id}, deleted=True)
+            xero_sync.delete_contacts(tenant_id, [resource_id])
         elif category == "INVOICE":
-            xero_sync.upsert_invoice(tenant_id, {"InvoiceID": resource_id}, deleted=True)
+            xero_sync.delete_invoices(tenant_id, [resource_id])
         return
 
     api_client, _ = get_authenticated_client(tenant_id)
     accounting = AccountingApi(api_client)
     if category == "CONTACT":
-        response = accounting.get_contact(tenant_id, resource_id)
+        try:
+            response = accounting.get_contact(tenant_id, resource_id)
+        except HTTPStatusException as exc:
+            if exc.status == 404:
+                xero_sync.delete_contacts(tenant_id, [resource_id])
+                return
+            raise
         contact = _first_item(response, "contacts")
         if contact:
             xero_sync.upsert_contact(tenant_id, contact.to_dict())
         return
     if category == "INVOICE":
-        response = accounting.get_invoice(tenant_id, resource_id)
+        try:
+            response = accounting.get_invoice(tenant_id, resource_id)
+        except HTTPStatusException as exc:
+            if exc.status == 404:
+                xero_sync.delete_invoices(tenant_id, [resource_id])
+                return
+            raise
         invoice = _first_item(response, "invoices")
         if invoice:
             xero_sync.upsert_invoice(tenant_id, invoice.to_dict())

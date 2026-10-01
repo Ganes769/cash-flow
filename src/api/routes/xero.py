@@ -13,8 +13,8 @@ from src.api.xero.auth import (
     get_oauth_setup,
 )
 from src.api.xero.config import FRONTEND_ORIGIN, LOGIN_PATH, LOGIN_URL_PATH, WEBHOOK_KEY
-from src.api.xero.contacts import fetch_contacts
-from src.api.xero.invoices import fetch_invoices
+from src.api.xero.contacts import fetch_contacts, refresh_synced_contacts
+from src.api.xero.invoices import fetch_invoices, refresh_synced_invoices
 from src.api.xero.exceptions import XeroNotConnectedError
 from src.api.xero import token_store
 from src.api.xero.webhooks import process_payload, verify_signature
@@ -143,9 +143,15 @@ def get_invoices(page: int = 1, page_size: int = 100):
 
 @router.get("/synced/contacts")
 def synced_contacts():
+    try:
+        refresh_synced_contacts()
+    except (XeroNotConnectedError, RuntimeError, Exception):
+        pass
     with SessionLocal() as db:
         rows = db.execute(
-            select(XeroContactRecord).order_by(XeroContactRecord.updated_at.desc())
+            select(XeroContactRecord)
+            .where(XeroContactRecord.deleted.is_(False))
+            .order_by(XeroContactRecord.updated_at.desc())
         ).scalars().all()
         return {
             "count": len(rows),
@@ -165,9 +171,15 @@ def synced_contacts():
 
 @router.get("/synced/invoices")
 def synced_invoices():
+    try:
+        refresh_synced_invoices()
+    except (XeroNotConnectedError, RuntimeError, Exception):
+        pass
     with SessionLocal() as db:
         rows = db.execute(
-            select(XeroInvoiceRecord).order_by(XeroInvoiceRecord.updated_at.desc())
+            select(XeroInvoiceRecord)
+            .where(XeroInvoiceRecord.deleted.is_(False))
+            .order_by(XeroInvoiceRecord.updated_at.desc())
         ).scalars().all()
         return {
             "count": len(rows),
