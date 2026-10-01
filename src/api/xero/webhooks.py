@@ -1,6 +1,7 @@
 import base64
 import hmac
 import json
+import logging
 from hashlib import sha256
 
 from xero_python.accounting import AccountingApi
@@ -9,6 +10,8 @@ from xero_python.exceptions import HTTPStatusException
 from src.api.xero.auth import get_authenticated_client
 from src.api.xero.config import WEBHOOK_KEY
 from src.api.xero import sync as xero_sync
+
+logger = logging.getLogger(__name__)
 
 
 def verify_signature(payload: bytes, signature: str | None) -> bool:
@@ -32,6 +35,13 @@ def _apply_event(event: dict) -> None:
     if not tenant_id or not resource_id:
         return
 
+    logger.info(
+        "Xero webhook %s %s tenant=%s id=%s",
+        category,
+        event_type,
+        tenant_id,
+        resource_id,
+    )
     deleted = event_type == "DELETE"
     if deleted:
         if category == "CONTACT":

@@ -26,3 +26,7 @@ LOGIN_PATH = "/xero/login"
 LOGIN_URL_PATH = "/xero/login/url"
 FRONTEND_ORIGIN = os.getenv("FRONTEND_ORIGIN", "http://localhost:5190").strip().rstrip("/")
 WEBHOOK_KEY = (os.getenv("XERO_WEBHOOK_KEY") or "").strip()
+try:
+    SYNC_INTERVAL_SECONDS = max(5, int(os.getenv("XERO_SYNC_INTERVAL_SECONDS", "15")))
+except ValueError:
+    SYNC_INTERVAL_SECONDS = 15

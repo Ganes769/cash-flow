@@ -1,3 +1,4 @@
+import asyncio
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI
@@ -6,13 +7,18 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from src.api.routes.xero import router as xero_router
+from src.api.xero.realtime import realtime_loop
 from src.db.database import get_db, init_db
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     init_db()
+    stop = asyncio.Event()
+    task = asyncio.create_task(realtime_loop(stop))
     yield
+    stop.set()
+    await task
 
 
 app = FastAPI(title="Cashflow Agent API", lifespan=lifespan)
@@ -46,6 +52,7 @@ def root():
         "xero_contacts": "/xero/contacts",
         "xero_invoices": "/xero/invoices",
         "xero_webhooks": "/xero/webhooks",
+        "xero_sync": "/xero/sync",
         "xero_synced_contacts": "/xero/synced/contacts",
         "xero_synced_invoices": "/xero/synced/invoices",
     }

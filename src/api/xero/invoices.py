@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from xero_python.accounting import AccountingApi
 from xero_python.exceptions import HTTPStatusException
 
@@ -5,16 +7,23 @@ from src.api.xero.auth import get_authenticated_client
 from src.api.xero import sync as xero_sync
 
 
-def fetch_invoices(page: int = 1, page_size: int = 100) -> dict:
+def fetch_invoices(
+    page: int = 1,
+    page_size: int = 100,
+    if_modified_since: datetime | None = None,
+) -> dict:
     api_client, tenant_id = get_authenticated_client()
     accounting_api = AccountingApi(api_client)
+    kwargs = {
+        "xero_tenant_id": tenant_id,
+        "page": page,
+        "page_size": page_size,
+    }
+    if if_modified_since:
+        kwargs["if_modified_since"] = if_modified_since
 
     try:
-        response = accounting_api.get_invoices(
-            xero_tenant_id=tenant_id,
-            page=page,
-            page_size=page_size,
-        )
+        response = accounting_api.get_invoices(**kwargs)
     except HTTPStatusException as exc:
         if exc.status == 403:
             raise RuntimeError(
@@ -27,10 +36,7 @@ def fetch_invoices(page: int = 1, page_size: int = 100) -> dict:
         xero_sync._json_safe(invoice.to_dict())
         for invoice in (response.invoices or [])
     ]
-    try:
-        stored = xero_sync.upsert_invoices(tenant_id, invoices)
-    except Exception:
-        stored = 0
+    stored = xero_sync.upsert_invoices(tenant_id, invoices)
     return {
         "count": len(invoices),
         "stored": stored,

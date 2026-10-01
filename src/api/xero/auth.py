@@ -157,6 +157,9 @@ def complete_oauth_callback(code: str) -> dict:
         tenant_id=chosen.tenant_id,
         tenant_name=getattr(chosen, "tenant_name", None),
     )
+    from src.api.xero.realtime import start_sync
+
+    start_sync(full=True)
 
     return {
         "connected": True,

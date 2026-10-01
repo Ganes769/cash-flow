@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from xero_python.accounting import AccountingApi
 from xero_python.exceptions import HTTPStatusException
 
@@ -5,16 +7,23 @@ from src.api.xero.auth import get_authenticated_client
 from src.api.xero import sync as xero_sync
 
 
-def fetch_contacts(page: int = 1, page_size: int = 100) -> dict:
+def fetch_contacts(
+    page: int = 1,
+    page_size: int = 100,
+    if_modified_since: datetime | None = None,
+) -> dict:
     api_client, tenant_id = get_authenticated_client()
     accounting_api = AccountingApi(api_client)
+    kwargs = {
+        "xero_tenant_id": tenant_id,
+        "page": page,
+        "page_size": page_size,
+    }
+    if if_modified_since:
+        kwargs["if_modified_since"] = if_modified_since
 
     try:
-        response = accounting_api.get_contacts(
-            xero_tenant_id=tenant_id,
-            page=page,
-            page_size=page_size,
-        )
+        response = accounting_api.get_contacts(**kwargs)
     except HTTPStatusException as exc:
         if exc.status == 403:
             raise RuntimeError(

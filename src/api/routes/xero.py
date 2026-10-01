@@ -1,8 +1,9 @@
 import json
-
+import logging
+import threading
 from urllib.parse import urlencode
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import RedirectResponse, Response
 from sqlalchemy import select
 
@@ -16,10 +17,13 @@ from src.api.xero.config import FRONTEND_ORIGIN, LOGIN_PATH, LOGIN_URL_PATH, WEB
 from src.api.xero.contacts import fetch_contacts, refresh_synced_contacts
 from src.api.xero.invoices import fetch_invoices, refresh_synced_invoices
 from src.api.xero.exceptions import XeroNotConnectedError
+from src.api.xero.realtime import last_sync_status, run_sync, start_sync
 from src.api.xero import token_store
 from src.api.xero.webhooks import process_payload, verify_signature
 from src.db.database import SessionLocal
 from src.db.schema.xero_sync import XeroContactRecord, XeroInvoiceRecord, XeroWebhookEvent
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/xero", tags=["Xero"])
 
@@ -46,7 +50,7 @@ def login():
 
 
 @router.post("/webhooks")
-async def xero_webhooks(request: Request, background: BackgroundTasks):
+async def xero_webhooks(request: Request):
     payload = await request.body()
     signature = request.headers.get("x-xero-signature")
     if not WEBHOOK_KEY or not verify_signature(payload, signature):
@@ -55,7 +59,7 @@ async def xero_webhooks(request: Request, background: BackgroundTasks):
         body = json.loads(payload.decode("utf-8") or "{}")
     except json.JSONDecodeError:
         body = {}
-    background.add_task(process_payload, body)
+    threading.Thread(target=process_payload, args=(body,), daemon=True).start()
     return Response(status_code=200)
 
 
@@ -109,6 +113,7 @@ def oauth_callback(
 @router.get("/status")
 def status(request: Request):
     payload = get_connection_status()
+    payload["last_sync"] = last_sync_status()
     if _wants_html(request):
         if payload.get("connected") and payload.get("token_valid"):
             return _app_redirect("/login/xero")
@@ -141,12 +146,26 @@ def get_invoices(page: int = 1, page_size: int = 100):
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
+@router.post("/sync")
+def trigger_sync(full: bool = False, wait: bool = False):
+    if wait:
+        try:
+            return run_sync(full=full)
+        except XeroNotConnectedError as exc:
+            raise _not_connected_response(exc) from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+    start_sync(full=full)
+    return {"status": "started", "mode": "full" if full else "changed"}
+
+
 @router.get("/synced/contacts")
-def synced_contacts():
-    try:
-        refresh_synced_contacts()
-    except (XeroNotConnectedError, RuntimeError, Exception):
-        pass
+def synced_contacts(refresh: bool = False):
+    if refresh:
+        try:
+            refresh_synced_contacts()
+        except (XeroNotConnectedError, RuntimeError, Exception):
+            logger.exception("Contact refresh failed")
     with SessionLocal() as db:
         rows = db.execute(
             select(XeroContactRecord)
@@ -170,11 +189,12 @@ def synced_contacts():
 
 
 @router.get("/synced/invoices")
-def synced_invoices():
-    try:
-        refresh_synced_invoices()
-    except (XeroNotConnectedError, RuntimeError, Exception):
-        pass
+def synced_invoices(refresh: bool = False):
+    if refresh:
+        try:
+            refresh_synced_invoices()
+        except (XeroNotConnectedError, RuntimeError, Exception):
+            logger.exception("Invoice refresh failed")
     with SessionLocal() as db:
         rows = db.execute(
             select(XeroInvoiceRecord)
