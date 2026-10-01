@@ -216,7 +216,7 @@ def get_connection_status() -> dict:
         status["connection_count"] = 1
 
     if status["token_valid"]:
-        status["message"] = "Connected. GET /xero/contacts is ready."
+        status["message"] = "Connected. GET /xero/contacts and GET /xero/invoices are ready."
     else:
         status["message"] = "Xero session expired. Open /xero/login again."
 

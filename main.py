@@ -20,6 +20,7 @@ app = FastAPI(title="Cashflow Agent API", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
+        "https://cash-flow-5gdu.onrender.com",
         "http://127.0.0.1:8000",
         "http://localhost:8000",
         "http://localhost:5190",
@@ -43,6 +44,7 @@ def root():
         "xero_login_url": "/xero/login/url",
         "xero_status": "/xero/status",
         "xero_contacts": "/xero/contacts",
+        "xero_invoices": "/xero/invoices",
         "xero_webhooks": "/xero/webhooks",
         "xero_synced_contacts": "/xero/synced/contacts",
         "xero_synced_invoices": "/xero/synced/invoices",

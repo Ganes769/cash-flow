@@ -5,12 +5,12 @@ from src.api.xero.auth import get_authenticated_client
 from src.api.xero import sync as xero_sync
 
 
-def fetch_contacts(page: int = 1, page_size: int = 100) -> dict:
+def fetch_invoices(page: int = 1, page_size: int = 100) -> dict:
     api_client, tenant_id = get_authenticated_client()
     accounting_api = AccountingApi(api_client)
 
     try:
-        response = accounting_api.get_contacts(
+        response = accounting_api.get_invoices(
             xero_tenant_id=tenant_id,
             page=page,
             page_size=page_size,
@@ -19,14 +19,14 @@ def fetch_contacts(page: int = 1, page_size: int = 100) -> dict:
         if exc.status == 403:
             raise RuntimeError(
                 "Xero returned 403. Reconnect at /xero/login and ensure the Web app "
-                "has accounting.contacts.read scope."
+                "has accounting.transactions.read scope."
             ) from exc
         raise
 
-    contacts = [contact.to_dict() for contact in (response.contacts or [])]
-    stored = xero_sync.upsert_contacts(tenant_id, contacts)
+    invoices = [invoice.to_dict() for invoice in (response.invoices or [])]
+    stored = xero_sync.upsert_invoices(tenant_id, invoices)
     return {
-        "count": len(contacts),
+        "count": len(invoices),
         "stored": stored,
-        "contacts": contacts,
+        "invoices": invoices,
     }

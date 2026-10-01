@@ -1,5 +1,7 @@
 import json
 
+from urllib.parse import urlencode
+
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from fastapi.responses import RedirectResponse, Response
 from sqlalchemy import select
@@ -12,6 +14,7 @@ from src.api.xero.auth import (
 )
 from src.api.xero.config import FRONTEND_ORIGIN, LOGIN_PATH, LOGIN_URL_PATH, WEBHOOK_KEY
 from src.api.xero.contacts import fetch_contacts
+from src.api.xero.invoices import fetch_invoices
 from src.api.xero.exceptions import XeroNotConnectedError
 from src.api.xero import token_store
 from src.api.xero.webhooks import process_payload, verify_signature
@@ -93,7 +96,9 @@ def oauth_callback(
     if not code:
         return _app_redirect("/login", error="missing_code")
     if not token_store.verify_oauth_state(state):
-        return _app_redirect("/login", error="invalid_state")
+        # State was issued by another host (e.g. Render). Do not consume the code.
+        query = urlencode({"code": code, "state": state or ""})
+        return RedirectResponse(f"{FRONTEND_ORIGIN}/login/xero?{query}", status_code=302)
     try:
         complete_oauth_callback(code)
     except RuntimeError:
@@ -120,6 +125,16 @@ def oauth_setup():
 def get_contacts(page: int = 1, page_size: int = 100):
     try:
         return fetch_contacts(page=page, page_size=page_size)
+    except XeroNotConnectedError as exc:
+        raise _not_connected_response(exc) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@router.get("/invoices")
+def get_invoices(page: int = 1, page_size: int = 100):
+    try:
+        return fetch_invoices(page=page, page_size=page_size)
     except XeroNotConnectedError as exc:
         raise _not_connected_response(exc) from exc
     except RuntimeError as exc:
