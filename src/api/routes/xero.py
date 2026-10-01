@@ -1,5 +1,8 @@
-from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import RedirectResponse
+import json
+
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
+from fastapi.responses import RedirectResponse, Response
+from sqlalchemy import select
 
 from src.api.xero.auth import (
     begin_oauth,
@@ -7,10 +10,13 @@ from src.api.xero.auth import (
     get_connection_status,
     get_oauth_setup,
 )
-from src.api.xero.config import FRONTEND_ORIGIN, LOGIN_PATH, LOGIN_URL_PATH
+from src.api.xero.config import FRONTEND_ORIGIN, LOGIN_PATH, LOGIN_URL_PATH, WEBHOOK_KEY
 from src.api.xero.contacts import fetch_contacts
 from src.api.xero.exceptions import XeroNotConnectedError
 from src.api.xero import token_store
+from src.api.xero.webhooks import process_payload, verify_signature
+from src.db.database import SessionLocal
+from src.db.schema.xero_sync import XeroContactRecord, XeroInvoiceRecord, XeroWebhookEvent
 
 router = APIRouter(prefix="/xero", tags=["Xero"])
 
@@ -33,7 +39,21 @@ def login():
         authorize_url = begin_oauth()
     except RuntimeError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
-    return RedirectResponse(authorize_url)
+    return RedirectResponse(authorize_url, status_code=302)
+
+
+@router.post("/webhooks")
+async def xero_webhooks(request: Request, background: BackgroundTasks):
+    payload = await request.body()
+    signature = request.headers.get("x-xero-signature")
+    if not WEBHOOK_KEY or not verify_signature(payload, signature):
+        raise HTTPException(status_code=401, detail="Invalid Xero webhook signature")
+    try:
+        body = json.loads(payload.decode("utf-8") or "{}")
+    except json.JSONDecodeError:
+        body = {}
+    background.add_task(process_payload, body)
+    return Response(status_code=200)
 
 
 @router.get("/login/url")
@@ -104,3 +124,73 @@ def get_contacts(page: int = 1, page_size: int = 100):
         raise _not_connected_response(exc) from exc
     except RuntimeError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@router.get("/synced/contacts")
+def synced_contacts():
+    with SessionLocal() as db:
+        rows = db.execute(
+            select(XeroContactRecord).order_by(XeroContactRecord.updated_at.desc())
+        ).scalars().all()
+        return {
+            "count": len(rows),
+            "contacts": [
+                {
+                    "id": str(row.xero_contact_id),
+                    "name": row.name,
+                    "email": row.email,
+                    "deleted": row.deleted,
+                    "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+                    "payload": row.payload,
+                }
+                for row in rows
+            ],
+        }
+
+
+@router.get("/synced/invoices")
+def synced_invoices():
+    with SessionLocal() as db:
+        rows = db.execute(
+            select(XeroInvoiceRecord).order_by(XeroInvoiceRecord.updated_at.desc())
+        ).scalars().all()
+        return {
+            "count": len(rows),
+            "invoices": [
+                {
+                    "id": str(row.xero_invoice_id),
+                    "invoice_number": row.invoice_number,
+                    "status": row.status,
+                    "deleted": row.deleted,
+                    "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+                    "payload": row.payload,
+                }
+                for row in rows
+            ],
+        }
+
+
+@router.get("/webhooks/events")
+def webhook_events(limit: int = 50):
+    with SessionLocal() as db:
+        rows = db.execute(
+            select(XeroWebhookEvent)
+            .order_by(XeroWebhookEvent.created_at.desc())
+            .limit(limit)
+        ).scalars().all()
+        return {
+            "count": len(rows),
+            "events": [
+                {
+                    "id": str(row.id),
+                    "tenant_id": row.tenant_id,
+                    "resource_id": row.resource_id,
+                    "event_category": row.event_category,
+                    "event_type": row.event_type,
+                    "processed": row.processed,
+                    "error": row.error,
+                    "created_at": row.created_at.isoformat() if row.created_at else None,
+                }
+                for row in rows
+            ],
+        }

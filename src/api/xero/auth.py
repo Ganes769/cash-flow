@@ -30,12 +30,29 @@ def build_authorize_url() -> tuple[str, str]:
             "redirect_uri": REDIRECT_URI,
             "scope": SCOPES,
             "state": state,
+            "prompt": "consent",
         }
     )
     return f"https://login.xero.com/identity/connect/authorize?{params}", state
 
 
+def _revoke_existing_connections() -> None:
+    token = token_store.load_token()
+    if not token or not token_store.token_is_valid(token):
+        return
+    try:
+        api_client = _build_api_client()
+        api_client.configuration.oauth2_token.update_token(**token_store.sdk_token(token))
+        identity = IdentityApi(api_client)
+        for connection in identity.get_connections() or []:
+            identity.delete_connection(connection.id)
+        token_store.clear_tokens()
+    except Exception:
+        token_store.clear_cached_token()
+
+
 def begin_oauth() -> str:
+    _revoke_existing_connections()
     authorize_url, state = build_authorize_url()
     token_store.save_oauth_state(state)
     return authorize_url
@@ -81,26 +98,34 @@ def _build_api_client() -> ApiClient:
     )
 
 
+def _pick_organisation(api_client: ApiClient):
+    connections = IdentityApi(api_client).get_connections() or []
+    chosen = next(
+        (connection for connection in connections if connection.tenant_type == "ORGANISATION"),
+        connections[0] if connections else None,
+    )
+    if not chosen:
+        raise RuntimeError(
+            "No Xero organisation connected. Complete login at /xero/login."
+        )
+    return chosen
+
+
 def resolve_tenant_id(api_client: ApiClient) -> str:
     tenant_id = token_store.load_tenant_id()
     if tenant_id:
         return tenant_id
 
-    connections = IdentityApi(api_client).get_connections() or []
-    for connection in connections:
-        if connection.tenant_type == "ORGANISATION":
-            token_store.save_tenant_id(connection.tenant_id)
-            return connection.tenant_id
-
-    if connections:
-        token_store.save_tenant_id(connections[0].tenant_id)
-        return connections[0].tenant_id
-
-    raise RuntimeError("No Xero organisation connected. Complete login at /xero/login.")
+    chosen = _pick_organisation(api_client)
+    token_store.save_tenant_id(chosen.tenant_id)
+    return chosen.tenant_id
 
 
-def get_authenticated_client() -> tuple[ApiClient, str]:
-    token = token_store.load_token()
+def get_authenticated_client(tenant_id: str | None = None) -> tuple[ApiClient, str]:
+    if tenant_id:
+        token_store.save_tenant_id(tenant_id)
+        token_store.clear_cached_token()
+    token = token_store.load_token(tenant_id)
     if not token:
         raise XeroNotConnectedError(
             "Not connected to Xero yet. Complete OAuth login first."
@@ -108,15 +133,15 @@ def get_authenticated_client() -> tuple[ApiClient, str]:
 
     api_client = _build_api_client()
     oauth2_token = api_client.configuration.oauth2_token
-    oauth2_token.update_token(**token)
+    oauth2_token.update_token(**token_store.sdk_token(token))
 
     if not token_store.token_is_valid(token):
         if not token.get("refresh_token"):
             raise RuntimeError("Xero session expired. Open /xero/login again.")
         api_client.refresh_oauth2_token()
 
-    tenant_id = resolve_tenant_id(api_client)
-    return api_client, tenant_id
+    resolved = resolve_tenant_id(api_client)
+    return api_client, tenant_id or resolved
 
 
 def complete_oauth_callback(code: str) -> dict:
@@ -124,12 +149,18 @@ def complete_oauth_callback(code: str) -> dict:
     token_store.save_token(token)
 
     api_client = _build_api_client()
-    api_client.configuration.oauth2_token.update_token(**token)
-    tenant_id = resolve_tenant_id(api_client)
+    api_client.configuration.oauth2_token.update_token(**token_store.sdk_token(token))
+    chosen = _pick_organisation(api_client)
+
+    token_store.save_connection(
+        token,
+        tenant_id=chosen.tenant_id,
+        tenant_name=getattr(chosen, "tenant_name", None),
+    )
 
     return {
         "connected": True,
-        "tenant_id": tenant_id,
+        "tenant_id": chosen.tenant_id,
         "scopes": token.get("scope"),
     }
 
@@ -141,13 +172,15 @@ def get_oauth_setup() -> dict:
         "redirect_uri_alternate_localhost": REDIRECT_URI.replace(
             "127.0.0.1", "localhost"
         ),
-        "xero_developer_steps": [
-            "Open https://developer.xero.com/app/manage",
-            "Open your Web app (Client ID must match .env)",
-            "Configuration → OAuth 2.0 redirect URIs",
-            f"Add this URI exactly (copy/paste): {REDIRECT_URI}",
-            "Save the app, wait ~1 minute, then retry /xero/login",
-        ],
+            "xero_developer_steps": [
+                "Open https://developer.xero.com/app/manage",
+                "Open your Web app (Client ID must match .env)",
+                "Configuration → OAuth 2.0 redirect URIs",
+                f"Add this URI exactly (copy/paste): {REDIRECT_URI}",
+                "Webhooks → Delivery URL: https://YOUR_PUBLIC_HOST/xero/webhooks",
+                "Copy the webhook key into XERO_WEBHOOK_KEY, then click Intent to receive",
+                "Save the app, wait ~1 minute, then retry /xero/login",
+            ],
     }
 
 
@@ -179,15 +212,12 @@ def get_connection_status() -> dict:
 
     status["connected"] = True
     status["token_valid"] = token_store.token_is_valid(token)
+    if status["tenant_id"]:
+        status["connection_count"] = 1
 
-    try:
-        api_client, _ = get_authenticated_client()
-        connections = IdentityApi(api_client).get_connections() or []
-        status["connection_count"] = len(connections)
-        if connections and not status["tenant_id"]:
-            status["tenant_id"] = connections[0].tenant_id
+    if status["token_valid"]:
         status["message"] = "Connected. GET /xero/contacts is ready."
-    except RuntimeError as exc:
-        status["message"] = str(exc)
+    else:
+        status["message"] = "Xero session expired. Open /xero/login again."
 
     return status

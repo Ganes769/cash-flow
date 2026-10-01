@@ -1,13 +1,8 @@
 import os
-from pathlib import Path
 
 from dotenv import load_dotenv
 
 load_dotenv()
-
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
-TOKEN_PATH = PROJECT_ROOT / ".xero_token.json"
-STATE_PATH = PROJECT_ROOT / ".xero_oauth_state.json"
 
 CLIENT_ID = os.getenv("XERO_CLIENT_ID")
 CLIENT_SECRET = os.getenv("XERO_CLIENT_SECRET")
@@ -22,10 +17,12 @@ REDIRECT_URI = _normalize_redirect_uri(
 )
 
 DEFAULT_SCOPES = (
-    "offline_access openid profile email accounting.contacts.read"
+    "offline_access openid profile email "
+    "accounting.contacts.read accounting.transactions.read"
 )
 SCOPES = os.getenv("XERO_SCOPES", DEFAULT_SCOPES)
 
 LOGIN_PATH = "/xero/login"
 LOGIN_URL_PATH = "/xero/login/url"
-FRONTEND_ORIGIN = os.getenv("FRONTEND_ORIGIN", "http://localhost:5191").strip().rstrip("/")
+FRONTEND_ORIGIN = os.getenv("FRONTEND_ORIGIN", "http://localhost:5190").strip().rstrip("/")
+WEBHOOK_KEY = (os.getenv("XERO_WEBHOOK_KEY") or "").strip()
