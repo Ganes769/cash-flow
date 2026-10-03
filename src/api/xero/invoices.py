@@ -28,7 +28,7 @@ def fetch_invoices(
         if exc.status == 403:
             raise RuntimeError(
                 "Xero returned 403. Reconnect at /xero/login and ensure the Web app "
-                "has accounting.transactions.read scope."
+                "has accounting.invoices.read scope."
             ) from exc
         raise
 

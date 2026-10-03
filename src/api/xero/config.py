@@ -18,7 +18,7 @@ REDIRECT_URI = _normalize_redirect_uri(
 
 DEFAULT_SCOPES = (
     "offline_access openid profile email "
-    "accounting.contacts.read accounting.transactions.read"
+    "accounting.contacts.read accounting.invoices.read"
 )
 SCOPES = os.getenv("XERO_SCOPES", DEFAULT_SCOPES)
 

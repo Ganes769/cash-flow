@@ -180,6 +180,7 @@ def get_oauth_setup() -> dict:
                 "Open your Web app (Client ID must match .env)",
                 "Configuration → OAuth 2.0 redirect URIs",
                 f"Add this URI exactly (copy/paste): {REDIRECT_URI}",
+                "Scopes: enable accounting.contacts.read AND accounting.invoices.read (granular), then save",
                 "Webhooks → Delivery URL: https://YOUR_PUBLIC_HOST/xero/webhooks",
                 "Copy the webhook key into XERO_WEBHOOK_KEY, then click Intent to receive",
                 "Save the app, wait ~1 minute, then retry /xero/login",
