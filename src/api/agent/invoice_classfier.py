@@ -4,6 +4,7 @@ from typing import Optional
 from dotenv import load_dotenv
 from invoice_answer import generate_invoice_answer
 from langchain_groq import ChatGroq
+from pydantic import SecretStr
 from search_invoice import search_invoices
 
 load_dotenv()
@@ -12,7 +13,7 @@ apikey = os.getenv("GROQ_API_KEY")
 
 client = ChatGroq(
     model="openai/gpt-oss-20b",
-    api_key=apikey,
+    api_key=SecretStr(apikey) if apikey is not None else None,
     temperature=0,
 )
 

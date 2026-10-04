@@ -54,7 +54,9 @@ def search_invoices(
     payment_status: str | None = None,
     risk_level: str | None = None,
     top_k: int = 10,
+      customer_name: str | None = None,
 ):
+    """Search indexed invoices using a question and optional status or risk filters."""
 
     # -----------------------------------------
     # Create embedding
