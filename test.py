@@ -1,127 +1,125 @@
-import os
+# import os
 
-from dotenv import load_dotenv
-from langchain.agents import create_agent
-from langchain.tools import tool
-from langchain_groq import ChatGroq
+# from dotenv import load_dotenv
+# from langchain_groq import ChatGroq
+# from langgraph.graph import END, START, MessagesState, StateGraph
+# from langgraph.prebuilt import ToolNode, tools_condition
 
-from src.api.agent.search_invoice import search_invoices
+# from src.api.agent.tools.customer_tool import get_customer
+# from src.api.agent.tools.invoice_tools import get_invoice
 
-load_dotenv()
-
-
-# ============================================================
-# MODEL
-# ============================================================
-
-model = ChatGroq(
-    model="openai/gpt-oss-20b",
-    temperature=0,
-    api_key=os.getenv("GROQ_API_KEY"),
-)
+# load_dotenv()
 
 
-# ============================================================
-# TOOLS
-# ============================================================
+# # ============================================================
+# # TOOLS
+# # ============================================================
 
-@tool
-def get_invoice(invoice_number: str) -> dict:
-    """Retrieve an exact invoice by invoice number."""
-
-    # Replace this with your existing database/API implementation
-    # if you already have one.
-
-    return search_invoices(invoice_number)
+# tools = [
+#     get_invoice,
+#     get_customer,
+# ]
 
 
-tools = [
-    get_invoice,
-    search_invoices,
-]
+# # ============================================================
+# # LLM
+# # ============================================================
+
+# llm = ChatGroq(
+#     model="openai/gpt-oss-20b",
+#     temperature=0,
+#     api_key=os.getenv("GROQ_API_KEY"),
+# )
 
 
-# ============================================================
-# SYSTEM PROMPT
-# ============================================================
+# # ============================================================
+# # BIND TOOLS TO LLM
+# # ============================================================
 
-SYSTEM_PROMPT = """
-You are a business cashflow assistant.
-
-You help users understand customer invoices, payments,
-outstanding balances, collection status, and risk.
-
-Use the available tools to retrieve invoice information.
-
-Rules:
-
-1. If the user asks about a specific invoice number,
-   use get_invoice.
-
-2. If the user asks about a customer, outstanding invoices,
-   overdue invoices, payment status, collection status,
-   or risk, use search_invoices.
-
-3. Never invent invoice data.
-
-4. Clearly explain the result to the user.
-
-5. If there are no matching invoices, say so clearly.
-
-6. For financial totals, use the values returned by the tools.
-
-7. Keep the final answer concise and business-friendly.
-"""
+# llm_with_tools = llm.bind_tools(tools)
 
 
-# ============================================================
-# CREATE AGENT
-# ============================================================
+# # ============================================================
+# # AGENT NODE
+# # ============================================================
 
-agent = create_agent(
-    model=model,
-    tools=tools,
-    system_prompt=SYSTEM_PROMPT,
-)
+# def agent(state: MessagesState):
+#     response = llm_with_tools.invoke(state["messages"])
+
+#     return {
+#         "messages": [response]
+#     }
 
 
-# ============================================================
-# TEST
-# ============================================================
+# # ============================================================
+# # BUILD LANGGRAPH
+# # ============================================================
 
-if __name__ == "__main__":
+# builder = StateGraph(MessagesState)
 
-    question = """
-    Give me the current cashflow situation for customer
-    ABC Property Management.
+# # Nodes
+# builder.add_node("agent", agent)
+# builder.add_node("tools", ToolNode(tools))
 
-    Tell me:
-    - total invoiced
-    - total paid
-    - total outstanding
-    - overdue invoices
-    - risk level
-    - what action should be taken
-    """
+# # START -> Agent
+# builder.add_edge(START, "agent")
 
-    result = agent.invoke(
-        {
-            "messages": [
-                {
-                    "role": "user",
-                    "content": question,
-                }
-            ]
-        }
-    )
+# # Agent -> Tools OR END
+# builder.add_conditional_edges(
+#     "agent",
+#     tools_condition,
+# )
 
-    # ========================================================
-    # GET FINAL AI MESSAGE
-    # ========================================================
+# # Tools -> Agent
+# builder.add_edge("tools", "agent")
 
-    messages = result["messages"]
 
-    for message in reversed(messages):
-        if getattr(message, "type", None) == "ai":
-            print("\n" + message.content)
-            break
+# # Compile graph
+# graph = builder.compile()
+
+
+# # ============================================================
+# # QUESTION
+# # ============================================================
+
+# question = """
+# Give me the current cashflow situation for Ganesh Gnawali.
+
+# Tell me:
+# - total invoiced
+# - total paid
+# - total outstanding
+# - overdue invoices
+# - risk level
+# - recommended action
+# """
+
+
+# # ============================================================
+# # INVOKE GRAPH
+# # ============================================================
+
+# result = graph.invoke(
+#     {
+#         "messages": [
+#             {
+#                 "role": "user",
+#                 "content": question,
+#             }
+#         ]
+#     }
+# )
+
+
+# # ============================================================
+# # PRINT FINAL AI RESPONSE
+# # ============================================================
+
+# print("\n================ FINAL ANSWER ================\n")
+
+# for message in reversed(result["messages"]):
+
+#     if message.type == "ai" and message.content:
+#         print(message.content)
+#         break
+
