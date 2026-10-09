@@ -3,8 +3,9 @@
 import os
 
 from dotenv import load_dotenv
-from langchain_huggingface import HuggingFaceEmbeddings
 from pinecone import Pinecone
+
+from src.api.agent.embedding.embeddings import embed_query
 
 load_dotenv()
 
@@ -16,11 +17,6 @@ PINECONE_API_KEY = os.getenv(
 
 PINECONE_INDEX_NAME = os.getenv(
     "PINECONE_INDEX_NAME"
-)
-
-
-embeddings = HuggingFaceEmbeddings(
-    model_name="sentence-transformers/all-MiniLM-L6-v2"
 )
 
 
@@ -47,9 +43,7 @@ def search_invoices(
     """Search indexed invoices using a question and optional status or risk filters."""
 
 
-    query_vector = embeddings.embed_query(
-        question
-    )
+    query_vector = embed_query(question)
 
 
     filters = {}

@@ -14,8 +14,7 @@ langchain
 langgraph
 langchain-openai
 langchain-groq
-langchain-huggingface
 python-dotenv
 xero-python
-sentence-transformers
+fastembed
 pinecone

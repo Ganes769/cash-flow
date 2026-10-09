@@ -5,9 +5,10 @@ import os
 from datetime import date
 
 from dotenv import load_dotenv
-from langchain_huggingface import HuggingFaceEmbeddings
 from pinecone import Pinecone
 from sqlalchemy import create_engine, text
+
+from src.api.agent.embedding.embeddings import embed_query
 
 # ============================================================
 # ENV
@@ -36,15 +37,6 @@ if not PINECONE_INDEX_NAME:
 engine = create_engine(
     DATABASE_URL,
     pool_pre_ping=True,
-)
-
-
-# ============================================================
-# EMBEDDINGS
-# ============================================================
-
-embeddings = HuggingFaceEmbeddings(
-    model_name="sentence-transformers/all-MiniLM-L6-v2"
 )
 
 
@@ -493,9 +485,7 @@ def create_vector(invoice):
     # Embedding
     # -----------------------------------------
 
-    vector = embeddings.embed_query(
-        invoice_text
-    )
+    vector = embed_query(invoice_text)
 
     if len(vector) != 384:
 
