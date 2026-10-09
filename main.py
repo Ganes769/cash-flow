@@ -69,9 +69,6 @@ app.include_router(xero_router)
 app.include_router(agent_router)
 
 
-# ============================================================
-# ROOT
-# ============================================================
 
 @app.get("/")
 def root():
