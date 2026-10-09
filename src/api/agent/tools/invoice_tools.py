@@ -1,12 +1,9 @@
 from dotenv import load_dotenv
-from langchain.agents import create_agent
 from langchain.tools import tool
+
 from src.api.agent.search_invoice import search_invoices
 
 load_dotenv()
-import os
-
-from langchain_groq import ChatGroq
 
 
 @tool
@@ -34,6 +31,7 @@ def get_invoice(invoice_number: str) -> dict:
 
     return {
         "invoice_number": matching_invoice.get("invoice_number"),
+        # "email":matching_invoice.get("email"),
         "customer": matching_invoice.get("customer"),
         "total": matching_invoice.get("total"),
         "amount_paid": matching_invoice.get("amount_paid"),

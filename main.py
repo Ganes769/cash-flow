@@ -69,9 +69,6 @@ app.include_router(xero_router)
 app.include_router(agent_router)
 
 
-# ============================================================
-# ROOT
-# ============================================================
 
 @app.get("/")
 def root():
@@ -93,13 +90,11 @@ def root():
         "xero_synced_contacts": "/xero/synced/contacts",
         "xero_synced_invoices": "/xero/synced/invoices",
 
-        "agent": "/agent",
+        "agent": "/investigate",
     }
 
 
-# ============================================================
-# DATABASE TEST
-# ============================================================
+
 
 @app.get("/db-test")
 def db_test(
@@ -114,4 +109,3 @@ def db_test(
         "database": "Supabase PostgreSQL",
         "result": result.scalar(),
     }
-
