@@ -1,13 +1,7 @@
-import os
-
-from dotenv import load_dotenv
-from langchain.agents import create_agent
 from langchain_core.tools import tool
-from langchain_groq import ChatGroq
 
 from src.api.agent.search_invoice import search_invoices
 
-load_dotenv()
 
 @tool
 def get_customer(customer_name: str) -> dict:
@@ -73,27 +67,3 @@ def get_customer(customer_name: str) -> dict:
         "total_due": total_due,
         "invoices": invoices,
     }
-
-llm = ChatGroq(
-    model="openai/gpt-oss-20b",
-    api_key=os.getenv("GROQ_API_KEY"),
-    temperature=0,
-)
-
-agent = create_agent(
-    model=llm,
-    tools=[get_customer],
-)
-
-
-result = agent.invoke({
-    "messages": [
-        {
-            "role": "user",
-            "content": "Can you find ganesh gnawali customer?"
-        }
-    ]
-})
-
-
-print(result["messages"][-1].content)

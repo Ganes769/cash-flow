@@ -93,7 +93,7 @@ def root():
         "xero_synced_contacts": "/xero/synced/contacts",
         "xero_synced_invoices": "/xero/synced/invoices",
 
-        "agent": "/agent",
+        "agent": "/investigate",
     }
 
 
@@ -112,4 +112,3 @@ def db_test(
         "database": "Supabase PostgreSQL",
         "result": result.scalar(),
     }
-

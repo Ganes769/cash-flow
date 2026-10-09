@@ -1,11 +1,11 @@
 
 from fastapi import APIRouter
+from langchain_core.messages import HumanMessage
 from pydantic import BaseModel
 
 from src.api.agent.graph import graph
 
 router = APIRouter(
-    prefix="/agent",
     tags=["Agent"],
 )
 
@@ -19,17 +19,13 @@ class ChatResponse(BaseModel):
     response: str
 
 
-@router.post("/chat", response_model=ChatResponse)
-def chat(request: ChatRequest):
+@router.post("/investigate", response_model=ChatResponse)
+@router.post("/agent/chat", response_model=ChatResponse, include_in_schema=False)
+def investigate(request: ChatRequest):
 
     result = graph.invoke(
         {
-            "messages": [
-                {
-                    "role": "user",
-                    "content": request.message,
-                }
-            ]
+            "messages": [HumanMessage(content=request.message)]
         }
     )
 
@@ -42,4 +38,4 @@ def chat(request: ChatRequest):
 
     return ChatResponse(
         response="No response generated."
-  )
+    )
