@@ -85,7 +85,7 @@ def exchange_code_for_token(code: str) -> dict:
 def _build_api_client() -> ApiClient:
     if not CLIENT_ID or not CLIENT_SECRET:
         raise RuntimeError("XERO_CLIENT_ID and XERO_CLIENT_SECRET must be set.")
-    return ApiClient(
+    client = ApiClient(
         Configuration(
             debug=False,
             oauth2_token=OAuth2Token(
@@ -96,6 +96,11 @@ def _build_api_client() -> ApiClient:
         oauth2_token_saver=token_store.save_token,
         oauth2_token_getter=token_store.load_token,
     )
+    # urllib3 otherwise sleeps for Xero's Retry-After, which can be many hours.
+    pool = client.rest_client.pool_manager
+    pool.connection_pool_kw["retries"] = False
+    pool.clear()
+    return client
 
 
 def _pick_organisation(api_client: ApiClient):

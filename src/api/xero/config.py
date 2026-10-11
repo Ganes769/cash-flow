@@ -27,6 +27,7 @@ LOGIN_URL_PATH = "/xero/login/url"
 FRONTEND_ORIGIN = os.getenv("FRONTEND_ORIGIN", "http://localhost:5190").strip().rstrip("/")
 WEBHOOK_KEY = (os.getenv("XERO_WEBHOOK_KEY") or "").strip()
 try:
-    SYNC_INTERVAL_SECONDS = max(5, int(os.getenv("XERO_SYNC_INTERVAL_SECONDS", "15")))
+    # Xero's daily cap is small. A 15s poll spends it and then every sync sleeps.
+    SYNC_INTERVAL_SECONDS = max(60, int(os.getenv("XERO_SYNC_INTERVAL_SECONDS", "900")))
 except ValueError:
-    SYNC_INTERVAL_SECONDS = 15
+    SYNC_INTERVAL_SECONDS = 900

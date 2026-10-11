@@ -16,7 +16,7 @@ from src.api.xero.auth import (
 from src.api.xero.config import FRONTEND_ORIGIN, LOGIN_PATH, LOGIN_URL_PATH, WEBHOOK_KEY
 from src.api.xero.contacts import fetch_contacts, refresh_synced_contacts
 from src.api.xero.invoices import fetch_invoices, refresh_synced_invoices
-from src.api.xero.exceptions import XeroNotConnectedError
+from src.api.xero.exceptions import XeroNotConnectedError, XeroRateLimitError
 from src.api.xero.realtime import last_sync_status, run_sync, start_sync
 from src.api.xero import token_store
 from src.api.xero.webhooks import process_payload, verify_signature
@@ -132,6 +132,8 @@ def get_contacts(page: int = 1, page_size: int = 100):
         return fetch_contacts(page=page, page_size=page_size)
     except XeroNotConnectedError as exc:
         raise _not_connected_response(exc) from exc
+    except XeroRateLimitError as exc:
+        raise HTTPException(status_code=429, detail=str(exc)) from exc
     except RuntimeError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
@@ -142,6 +144,8 @@ def get_invoices(page: int = 1, page_size: int = 100):
         return fetch_invoices(page=page, page_size=page_size)
     except XeroNotConnectedError as exc:
         raise _not_connected_response(exc) from exc
+    except XeroRateLimitError as exc:
+        raise HTTPException(status_code=429, detail=str(exc)) from exc
     except RuntimeError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
@@ -153,6 +157,8 @@ def trigger_sync(full: bool = False, wait: bool = False):
             return run_sync(full=full)
         except XeroNotConnectedError as exc:
             raise _not_connected_response(exc) from exc
+        except XeroRateLimitError as exc:
+            raise HTTPException(status_code=429, detail=str(exc)) from exc
         except RuntimeError as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
     start_sync(full=full)

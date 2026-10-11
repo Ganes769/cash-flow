@@ -4,6 +4,7 @@ from xero_python.accounting import AccountingApi
 from xero_python.exceptions import HTTPStatusException
 
 from src.api.xero.auth import get_authenticated_client
+from src.api.xero.exceptions import rate_limit_error
 from src.api.xero import sync as xero_sync
 
 
@@ -25,6 +26,9 @@ def fetch_invoices(
     try:
         response = accounting_api.get_invoices(**kwargs)
     except HTTPStatusException as exc:
+        limited = rate_limit_error(exc)
+        if limited is not None:
+            raise limited from exc
         if exc.status == 403:
             raise RuntimeError(
                 "Xero returned 403. Reconnect at /xero/login and ensure the Web app "

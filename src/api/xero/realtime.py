@@ -7,7 +7,7 @@ from sqlalchemy import func, select
 
 from src.api.xero.config import SYNC_INTERVAL_SECONDS
 from src.api.xero.contacts import fetch_contacts, refresh_synced_contacts
-from src.api.xero.exceptions import XeroNotConnectedError
+from src.api.xero.exceptions import XeroNotConnectedError, XeroRateLimitError
 from src.api.xero.invoices import fetch_invoices, refresh_synced_invoices
 from src.db.database import SessionLocal
 from src.db.schema.xero_sync import XeroContactRecord, XeroInvoiceRecord
@@ -15,6 +15,7 @@ from src.db.schema.xero_sync import XeroContactRecord, XeroInvoiceRecord
 logger = logging.getLogger(__name__)
 
 _poll_lock = threading.Lock()
+_pause_until: datetime | None = None
 _last_sync: dict = {
     "status": "idle",
     "mode": None,
@@ -27,6 +28,17 @@ _last_sync: dict = {
 
 def last_sync_status() -> dict:
     return dict(_last_sync)
+
+
+def _pause_remaining() -> float:
+    if _pause_until is None:
+        return 0
+    return (_pause_until - datetime.now(timezone.utc)).total_seconds()
+
+
+def _remember_rate_limit(exc: XeroRateLimitError) -> None:
+    global _pause_until
+    _pause_until = datetime.now(timezone.utc) + timedelta(seconds=exc.retry_after)
 
 
 def _aware(value: datetime | None) -> datetime | None:
@@ -69,6 +81,14 @@ def run_sync(full: bool = False) -> dict:
         "finished_at": datetime.now(timezone.utc).isoformat(),
         "error": None,
     }
+    remaining = _pause_remaining()
+    if remaining > 0:
+        result["status"] = "paused"
+        result["error"] = _last_sync.get("error") or (
+            "Xero API limit is used up. Sync is paused."
+        )
+        _last_sync.update(result)
+        return result
     try:
         contact_since = None if full else _since_for(XeroContactRecord)
         invoice_since = None if full else _since_for(XeroInvoiceRecord)
@@ -84,6 +104,11 @@ def run_sync(full: bool = False) -> dict:
         result["status"] = "skipped"
         result["error"] = str(exc)
         raise
+    except XeroRateLimitError as exc:
+        _remember_rate_limit(exc)
+        result["status"] = "paused"
+        result["error"] = str(exc)
+        logger.warning("%s", exc)
     except Exception as exc:
         logger.exception("Xero sync failed")
         result["status"] = "error"
@@ -105,6 +130,8 @@ def _run_sync_safe(full: bool = False) -> None:
         run_sync(full=full)
     except XeroNotConnectedError:
         return
+    except XeroRateLimitError:
+        return
     except Exception:
         logger.exception("Background Xero sync failed")
     finally:
@@ -115,7 +142,8 @@ async def realtime_loop(stop: asyncio.Event) -> None:
     await asyncio.sleep(3)
     while not stop.is_set():
         await asyncio.to_thread(_run_sync_safe, False)
+        delay = max(SYNC_INTERVAL_SECONDS, _pause_remaining())
         try:
-            await asyncio.wait_for(stop.wait(), timeout=SYNC_INTERVAL_SECONDS)
+            await asyncio.wait_for(stop.wait(), timeout=delay)
         except TimeoutError:
             continue
