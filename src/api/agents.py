@@ -25,6 +25,9 @@ class ChatRequest(BaseModel):
 
 class ChatResponse(BaseModel):
     response: str
+    email: str | None = None
+    customer: str | None = None
+    invoice_number: str | None = None
 
 
 def _message_content(message) -> str:
@@ -32,6 +35,31 @@ def _message_content(message) -> str:
     if isinstance(content, str):
         return content
     return json.dumps(content, ensure_ascii=False, default=str)
+
+
+def _tool_payload(message) -> dict:
+    content = message.content
+    if isinstance(content, dict):
+        return content
+    if not isinstance(content, str) or not content.strip():
+        return {}
+    try:
+        data = json.loads(content)
+    except json.JSONDecodeError:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _apply_tool_fields(item, fields: dict) -> dict:
+    payload = _tool_payload(item)
+    if item.name == "get_invoice":
+        fields["invoice_number"] = payload.get("invoice_number") or fields.get("invoice_number")
+        fields["customer"] = payload.get("customer") or fields.get("customer")
+        fields["email"] = payload.get("email") or fields.get("email")
+    elif item.name == "get_customer":
+        fields["customer"] = payload.get("customer") or fields.get("customer")
+        fields["email"] = payload.get("email") or fields.get("email")
+    return fields
 
 
 def _investigation_prompt(request: ChatRequest) -> str:
@@ -55,6 +83,11 @@ async def _investigation_events(message: str) -> AsyncIterator[str]:
     step = 0
     answer = ""
     tool_steps: dict[str, int] = {}
+    fields: dict = {
+        "email": None,
+        "customer": None,
+        "invoice_number": None,
+    }
 
     def event(name: str, payload: dict) -> str:
         return f"event: {name}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
@@ -86,16 +119,26 @@ async def _investigation_events(message: str) -> AsyncIterator[str]:
                         elif item.content:
                             answer = _message_content(item)
                     elif node == "tools" and item.type == "tool":
-                        yield event(
-                            "step",
-                            {
-                                "step": tool_steps.get(item.tool_call_id, step),
-                                "status": "completed",
-                                "tool": item.name,
-                            },
-                        )
+                        fields = _apply_tool_fields(item, fields)
+                        completed = {
+                            "step": tool_steps.get(item.tool_call_id, step),
+                            "status": "completed",
+                            "tool": item.name,
+                        }
+                        if item.name == "get_customer":
+                            completed["email"] = fields.get("email")
+                            completed["customer"] = fields.get("customer")
+                        yield event("step", completed)
 
-        yield event("result", {"response": answer})
+        yield event(
+            "result",
+            {
+                "response": answer,
+                "email": fields.get("email"),
+                "customer": fields.get("customer"),
+                "invoice_number": fields.get("invoice_number"),
+            },
+        )
     except Exception:
         logger.exception("Investigation graph failed")
         yield event("error", {"message": "Investigation failed. Check server logs."})
@@ -123,13 +166,21 @@ def investigate(request: ChatRequest):
         }
     )
 
-    for message in reversed(result["messages"]):
-
-        if message.type == "ai" and message.content:
-            return ChatResponse(
-                response=message.content
-            )
+    fields: dict = {
+        "email": None,
+        "customer": None,
+        "invoice_number": None,
+    }
+    answer = "No response generated."
+    for message in result["messages"]:
+        if message.type == "tool":
+            fields = _apply_tool_fields(message, fields)
+        elif message.type == "ai" and message.content:
+            answer = _message_content(message)
 
     return ChatResponse(
-        response="No response generated."
+        response=answer,
+        email=fields.get("email"),
+        customer=fields.get("customer"),
+        invoice_number=fields.get("invoice_number"),
     )
