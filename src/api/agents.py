@@ -46,7 +46,8 @@ def _investigation_prompt(request: ChatRequest) -> str:
         f"{request.message}\n\n"
         f"The currently open invoice is {invoice_number}. "
         "Use the get_invoice tool to retrieve this invoice before analyzing it. "
-        "Base the investigation on the retrieved invoice data."
+        "Then call get_customer with the customer name from that invoice to get their email. "
+        "Base the investigation on the retrieved invoice and customer data."
     )
 
 

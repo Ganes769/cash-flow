@@ -1,47 +1,48 @@
-from dotenv import load_dotenv
 from langchain.tools import tool
+from sqlalchemy import func, select
 
-from src.api.agent.search_invoice import search_invoices
+from src.db.database import SessionLocal
+from src.db.schema.xero_sync import XeroInvoiceRecord
 
-load_dotenv()
+
+def _payload_value(payload: dict, *keys):
+    for key in keys:
+        value = payload.get(key)
+        if value not in (None, ""):
+            return value
+    return None
 
 
 @tool
 def get_invoice(invoice_number: str) -> dict:
-    """Retrieve an exact invoice by invoice number."""
+    """Retrieve an exact invoice by invoice number from synced Xero records."""
 
-    results = search_invoices(
-        question=invoice_number,
-        top_k=10,
-    )
+    number = str(invoice_number or "").strip()
+    if not number:
+        return {"error": "Invoice number is required"}
 
-    normalized_invoice_number = str(invoice_number).strip().lower()
+    with SessionLocal() as db:
+        row = db.execute(
+            select(XeroInvoiceRecord).where(
+                XeroInvoiceRecord.deleted.is_(False),
+                func.lower(XeroInvoiceRecord.invoice_number) == number.lower(),
+            )
+        ).scalars().first()
 
-    matching_invoice = None
-    for match in results.matches:
-        metadata = match.metadata or {}
-        if str(metadata.get("invoice_number", "")).strip().lower() == normalized_invoice_number:
-            matching_invoice = metadata
-            break
+    if row is None:
+        return {"error": f"Invoice {number} not found"}
 
-    if matching_invoice is None:
-        return {
-            "error": f"Invoice {invoice_number} not found"
-        }
-
+    payload = row.payload or {}
+    contact = payload.get("contact") or payload.get("Contact") or {}
     return {
-        "invoice_number": matching_invoice.get("invoice_number"),
-        # "email":matching_invoice.get("email"),
-        "customer": matching_invoice.get("customer"),
-        "total": matching_invoice.get("total"),
-        "amount_paid": matching_invoice.get("amount_paid"),
-        "amount_due": matching_invoice.get("amount_due"),
-        "currency": matching_invoice.get("currency"),
-        "invoice_date": matching_invoice.get("invoice_date"),
-        "due_date": matching_invoice.get("due_date"),
-        "payment_status": matching_invoice.get("payment_status"),
-        "collection_status": matching_invoice.get("collection_status"),
-        "risk_level": matching_invoice.get("risk_level"),
-        "xero_status": matching_invoice.get("xero_status"),
+        "invoice_number": row.invoice_number,
+        "customer": _payload_value(contact, "name", "Name"),
+        "email": _payload_value(contact, "email_address", "EmailAddress"),
+        "total": _payload_value(payload, "total", "Total"),
+        "amount_paid": _payload_value(payload, "amount_paid", "AmountPaid"),
+        "amount_due": _payload_value(payload, "amount_due", "AmountDue"),
+        "currency": _payload_value(payload, "currency_code", "CurrencyCode") or "GBP",
+        "invoice_date": str(_payload_value(payload, "date", "Date") or ""),
+        "due_date": str(_payload_value(payload, "due_date", "DueDate") or ""),
+        "xero_status": row.status,
     }
-
