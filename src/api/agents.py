@@ -2,13 +2,23 @@
 import json
 import logging
 from collections.abc import AsyncIterator
+from datetime import date
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from langchain_core.messages import HumanMessage
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr, Field
+from sqlalchemy import func, select
 
 from src.api.agent.graph import graph
+from src.api.agent.mail import (
+    MailDeliveryError,
+    MailNotConfiguredError,
+    send_collection_email,
+)
+from src.db.database import SessionLocal
+from src.db.schema.collection import CollectionEmail
+from src.db.schema.xero_sync import XeroContactRecord, XeroInvoiceRecord
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +38,114 @@ class ChatResponse(BaseModel):
     email: str | None = None
     customer: str | None = None
     invoice_number: str | None = None
+    collection_status: str | None = None
+    can_send: bool = False
+
+
+class SendEmailRequest(BaseModel):
+    invoice_number: str = Field(min_length=1)
+    subject: str = Field(min_length=1, max_length=255)
+    body: str = Field(min_length=1)
+    to: EmailStr | None = None
+
+
+class SendEmailResponse(BaseModel):
+    status: str
+    id: str
+    to: EmailStr
+    invoice_number: str | None = None
+
+
+def _payload_value(payload: dict, *keys):
+    for key in keys:
+        value = payload.get(key)
+        if value not in (None, ""):
+            return value
+    return None
+
+
+_SENDABLE = {"OVERDUE", "DUE_TODAY", "DUE_SOON"}
+
+
+def _collection_status(xero_status: str | None, amount_due: float, due_date_string: str | None) -> str:
+    status = (xero_status or "").upper()
+    if status in {"DRAFT", "VOIDED", "DELETED"}:
+        return status
+    if amount_due <= 0:
+        return "PAID"
+    if not due_date_string:
+        return "OPEN"
+    try:
+        due_date = date.fromisoformat(str(due_date_string)[:10])
+    except ValueError:
+        return "OPEN"
+    days_until_due = (due_date - date.today()).days
+    if days_until_due < 0:
+        return "OVERDUE"
+    if days_until_due == 0:
+        return "DUE_TODAY"
+    if days_until_due <= 7:
+        return "DUE_SOON"
+    return "OPEN"
+
+
+def _invoice_mail_context(invoice_number: str | None) -> dict:
+    empty = {
+        "email": None,
+        "customer": None,
+        "collection_status": None,
+        "can_send": False,
+        "found": False,
+    }
+    if not invoice_number or not str(invoice_number).strip():
+        return empty
+    number = str(invoice_number).strip()
+    with SessionLocal() as db:
+        invoice = db.execute(
+            select(XeroInvoiceRecord).where(
+                XeroInvoiceRecord.deleted.is_(False),
+                func.lower(XeroInvoiceRecord.invoice_number) == number.lower(),
+            )
+        ).scalars().first()
+        if invoice is None:
+            return empty
+        payload = invoice.payload or {}
+        contact = payload.get("contact") or payload.get("Contact") or {}
+        name = str(_payload_value(contact, "name", "Name") or "").strip()
+        email = _payload_value(contact, "email_address", "EmailAddress")
+        if not email and name:
+            row = db.execute(
+                select(XeroContactRecord).where(
+                    XeroContactRecord.deleted.is_(False),
+                    func.lower(XeroContactRecord.name) == name.lower(),
+                )
+            ).scalars().first()
+            email = row.email if row else None
+        amount_due = float(_payload_value(payload, "amount_due", "AmountDue") or 0)
+        due_date = str(_payload_value(payload, "due_date", "DueDate") or "")
+        collection_status = _collection_status(invoice.status, amount_due, due_date)
+        email_text = str(email).strip() if email else None
+        return {
+            "email": email_text,
+            "customer": name or None,
+            "collection_status": collection_status,
+            "can_send": bool(email_text) and collection_status in _SENDABLE,
+            "found": True,
+        }
+
+
+def _record_sent_email(request: SendEmailRequest, recipient: str, provider_id: str) -> None:
+    with SessionLocal() as db:
+        db.add(
+            CollectionEmail(
+                invoice_number=request.invoice_number.strip(),
+                to_email=recipient,
+                subject=request.subject.strip(),
+                body=request.body,
+                provider_id=provider_id,
+            )
+        )
+        db.commit()
 
 
 def _message_content(message) -> str:
@@ -130,13 +248,16 @@ async def _investigation_events(message: str) -> AsyncIterator[str]:
                             completed["customer"] = fields.get("customer")
                         yield event("step", completed)
 
+        context = _invoice_mail_context(fields.get("invoice_number"))
         yield event(
             "result",
             {
                 "response": answer,
-                "email": fields.get("email"),
-                "customer": fields.get("customer"),
+                "email": context.get("email") or fields.get("email"),
+                "customer": context.get("customer") or fields.get("customer"),
                 "invoice_number": fields.get("invoice_number"),
+                "collection_status": context.get("collection_status"),
+                "can_send": context.get("can_send", False),
             },
         )
     except Exception:
@@ -178,9 +299,51 @@ def investigate(request: ChatRequest):
         elif message.type == "ai" and message.content:
             answer = _message_content(message)
 
+    context = _invoice_mail_context(fields.get("invoice_number"))
     return ChatResponse(
         response=answer,
-        email=fields.get("email"),
-        customer=fields.get("customer"),
+        email=context.get("email") or fields.get("email"),
+        customer=context.get("customer") or fields.get("customer"),
         invoice_number=fields.get("invoice_number"),
+        collection_status=context.get("collection_status"),
+        can_send=bool(context.get("can_send")),
+    )
+
+
+@router.post("/investigate/send", response_model=SendEmailResponse)
+def investigate_send(request: SendEmailRequest):
+    """Send a confirmed reminder for a due or overdue invoice."""
+    context = _invoice_mail_context(request.invoice_number)
+    if not context["found"]:
+        raise HTTPException(status_code=404, detail="Invoice not found.")
+    if context["collection_status"] not in _SENDABLE:
+        raise HTTPException(
+            status_code=400,
+            detail="Email can only be sent for overdue or due invoices.",
+        )
+    recipient = context["email"]
+    if not recipient:
+        raise HTTPException(status_code=400, detail="This customer has no email in Xero.")
+    if request.to and str(request.to).lower() != recipient.lower():
+        raise HTTPException(
+            status_code=400,
+            detail=f"Send only to the contact email on file ({recipient}).",
+        )
+    try:
+        message_id = send_collection_email(
+            to=recipient,
+            subject=request.subject.strip(),
+            body=request.body,
+        )
+    except MailNotConfiguredError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except MailDeliveryError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    _record_sent_email(request, recipient, message_id)
+    return SendEmailResponse(
+        status="sent",
+        id=message_id,
+        to=recipient,
+        invoice_number=request.invoice_number.strip(),
     )

@@ -91,6 +91,7 @@ def root():
         "xero_synced_invoices": "/xero/synced/invoices",
 
         "agent": "/investigate",
+        "send_email": "/investigate/send",
     }
 
 
