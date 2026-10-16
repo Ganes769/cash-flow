@@ -11,6 +11,7 @@ from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import func, select
 
 from src.api.agent.graph import graph
+from src.api.agent.tools.cash_snapshot import build_cash_snapshot
 from src.api.agent.mail import (
     MailDeliveryError,
     MailNotConfiguredError,
@@ -347,3 +348,9 @@ def investigate_send(request: SendEmailRequest):
         to=recipient,
         invoice_number=request.invoice_number.strip(),
     )
+
+
+@router.get("/cashflow/snapshot")
+def cashflow_snapshot():
+    """Overdue total, due this week, and who owes the most."""
+    return build_cash_snapshot()

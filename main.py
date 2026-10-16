@@ -92,6 +92,7 @@ def root():
 
         "agent": "/investigate",
         "send_email": "/investigate/send",
+        "cash_snapshot": "/cashflow/snapshot",
     }
 
 
